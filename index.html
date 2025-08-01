@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SPX Call Credit Spread Calculator</title>
+<title>SPX Realistic Call Credit Spread Calculator</title>
 <style>
   body {
     font-family: Arial, sans-serif;
@@ -31,74 +31,73 @@
     border-radius: 8px;
     padding: 20px;
     display: inline-block;
+    width: 90%;
+    max-width: 500px;
   }
 </style>
 </head>
 <body>
   <h1>SPX Call Credit Spread Calculator</h1>
-  <p>Enter SPX data to get realistic strike and premium estimates.</p>
+  <p>Find strikes with realistic premium (20–30% of spread width).</p>
 
   <input type="number" id="spxPrice" placeholder="SPX Price" step="0.01">
-  <input type="number" id="otmPercent" placeholder="OTM % (e.g. 2)" step="0.1">
-  <input type="number" id="dte" placeholder="Days to Expiration" step="1" value="1">
-  <input type="number" id="iv" placeholder="Implied Volatility (%)" step="0.1" value="12">
-  
+  <input type="number" id="otmPercent" placeholder="OTM % (e.g. 1.5)" step="0.1">
+
   <button onclick="calculate()">Calculate</button>
 
   <div class="result" id="result"></div>
 
 <script>
-// Black-Scholes Call Option Price
-function blackScholesCall(S, K, T, r, sigma) {
-    const d1 = (Math.log(S / K) + (r + (sigma * sigma) / 2) * T) / (sigma * Math.sqrt(T));
-    const d2 = d1 - sigma * Math.sqrt(T);
-    const N = x => 0.5 * (1 + erf(x / Math.sqrt(2)));
-    function erf(x) {
-        const sign = (x >= 0) ? 1 : -1;
-        x = Math.abs(x);
-        const a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741,
-              a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911;
-        const t = 1 / (1 + p * x);
-        const y = 1 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);
-        return sign * y;
-    }
-    return S * N(d1) - K * Math.exp(-r * T) * N(d2);
-}
-
 function calculate() {
   const price = parseFloat(document.getElementById('spxPrice').value);
   const otmPercent = parseFloat(document.getElementById('otmPercent').value) / 100;
-  const dte = parseFloat(document.getElementById('dte').value);
-  const iv = parseFloat(document.getElementById('iv').value) / 100;
-  const r = 0.05; // 5% risk-free rate
-  const spreadWidth = 5; // fixed 5 points
 
-  if (isNaN(price) || isNaN(otmPercent) || isNaN(dte) || isNaN(iv)) {
-    document.getElementById('result').innerHTML = "<p>Please enter all values.</p>";
+  if (isNaN(price) || isNaN(otmPercent) || price <= 0) {
+    document.getElementById('result').innerHTML = "<p>Please enter valid SPX price and OTM %.</p>";
     return;
   }
 
-  // Calculate strikes
+  // Strike calculation
   const shortStrike = Math.round(price * (1 + otmPercent) / 5) * 5;
-  const longStrike = shortStrike + spreadWidth;
 
-  // Convert DTE to years
-  const T = dte / 365;
+  // Spread options
+  const spreadWidths = [5, 10];
+  let output = `<p><strong>Short Strike:</strong> ${shortStrike}</p>`;
 
-  // Premium calculation
-  const shortPremium = blackScholesCall(price, shortStrike, T, r, iv);
-  const longPremium = blackScholesCall(price, longStrike, T, r, iv);
-  const credit = (shortPremium - longPremium) * 100;
+  spreadWidths.forEach(width => {
+    const longStrike = shortStrike + width;
+    // Premium target: 20–30% of spread width
+    const creditLow = width * 20;
+    const creditHigh = width * 30;
+    const maxLoss = width * 100 - creditHigh;
 
-  // Max loss
-  const maxLoss = spreadWidth * 100 - credit;
+    let note = "";
+    if (otmPercent > 0.02) {
+      note = "⚠ Premium likely too low — move strikes closer (1–1.5% OTM).";
+    } else if (otmPercent < 0.008) {
+      note = "⚠ Premium high but higher risk — check deltas (~20–25).";
+    } else {
+      note = "✓ Sweet spot for credit (15–20 delta).";
+    }
 
-  document.getElementById('result').innerHTML = `
-    <p><strong>Short Strike:</strong> ${shortStrike}<br>
-    <strong>Long Strike:</strong> ${longStrike}</p>
-    <p>Est. Credit: $${credit.toFixed(2)} | Max Loss: $${maxLoss.toFixed(2)}</p>
-    <p><strong>Exit Plan:</strong> Take 50–60% profit, cut losses near 2x credit or if SPX nears short strike.</p>
+    output += `
+      <hr>
+      <p><strong>${width}-Point Spread:</strong><br>
+      Long Strike: ${longStrike}<br>
+      Est. Credit: $${creditLow} – $${creditHigh}<br>
+      Max Loss: $${(width * 100 - creditHigh).toFixed(0)}<br>
+      ${note}</p>
+    `;
+  });
+
+  output += `
+    <hr>
+    <p><strong>Exit Plan:</strong><br>
+    - Take profit at 50–60% of credit.<br>
+    - Stop out if SPX nears short strike or loss ≈ 2× credit.</p>
   `;
+
+  document.getElementById('result').innerHTML = output;
 }
 </script>
 </body>
