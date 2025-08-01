@@ -11,11 +11,28 @@
     color: #fff;
     text-align: center;
     padding: 20px;
+    margin: 0;
   }
-  input, button {
+  input, select {
     padding: 10px;
     font-size: 16px;
     margin: 10px;
+    border-radius: 5px;
+    border: none;
+  }
+  .slider-label {
+    margin-top: 15px;
+    font-size: 14px;
+    display: block;
+  }
+  button {
+    padding: 10px 20px;
+    font-size: 16px;
+    margin: 15px;
+    background: #2979ff;
+    color: white;
+    border: none;
+    border-radius: 5px;
   }
   .result {
     margin-top: 20px;
@@ -26,13 +43,32 @@
     border-radius: 8px;
     padding: 20px;
     display: inline-block;
+    width: 90%;
+    max-width: 500px;
+  }
+  input[type=range] {
+    width: 80%;
   }
 </style>
 </head>
 <body>
   <h1>SPX Call Credit Spread Calculator</h1>
-  <p>Enter current SPX price to get 2–3% OTM strikes and risk metrics.</p>
+  <p>Adjust OTM %, spread width, and win rate for accurate strike + risk estimates.</p>
+
   <input type="number" id="spxPrice" placeholder="Enter SPX price" step="0.01">
+
+  <label class="slider-label">OTM %: <span id="otmLabel">2</span>%</label>
+  <input type="range" id="otmSlider" min="1" max="3" step="0.1" value="2" oninput="document.getElementById('otmLabel').textContent=this.value">
+
+  <label class="slider-label">Win Rate %: <span id="winLabel">80</span>%</label>
+  <input type="range" id="winSlider" min="75" max="85" step="1" value="80" oninput="document.getElementById('winLabel').textContent=this.value">
+
+  <label class="slider-label">Spread Width (points):</label>
+  <select id="spreadWidth">
+    <option value="5" selected>5 points</option>
+    <option value="10">10 points</option>
+  </select>
+
   <button onclick="calculate()">Calculate</button>
 
   <div class="result box" id="result"></div>
@@ -40,34 +76,44 @@
 <script>
 function calculate() {
   const price = parseFloat(document.getElementById('spxPrice').value);
+  const otmPercent = parseFloat(document.getElementById('otmSlider').value) / 100;
+  const winRate = parseFloat(document.getElementById('winSlider').value) / 100;
+  const spreadWidth = parseInt(document.getElementById('spreadWidth').value);
+
   if (isNaN(price) || price <= 0) {
     document.getElementById('result').innerHTML = "<p>Please enter a valid SPX price.</p>";
     return;
   }
 
-  // 2–3% OTM
-  const shortLow = Math.round(price * 1.02 / 5) * 5;
-  const shortHigh = Math.round(price * 1.03 / 5) * 5;
+  // Calculate strikes
+  const shortStrike = Math.round(price * (1 + otmPercent) / 5) * 5;
+  const longStrike = shortStrike + spreadWidth;
 
-  // Long strike = short strike + 5
-  const longLow = shortLow + 5;
-  const longHigh = shortHigh + 5;
+  // Estimate credit as 20–30% of spread width
+  const credit = spreadWidth * 0.25 * 100; // e.g., $125 credit on 5-point spread
+  const maxLoss = spreadWidth * 100 - credit;
+  const ev = (winRate * credit) - ((1 - winRate) * maxLoss);
 
-  // Credit and risk estimates (assuming ~1.20 credit typical for 5-point spread)
-  const credit = 120; // dollars
-  const maxLoss = 500 - credit; // dollars
-  const winRate = 80; // %
-  const ev = ((winRate/100) * credit) - ((1 - winRate/100) * maxLoss);
+  let guidance = "";
+  if (credit < 80) {
+    guidance = "Credit is low — move strikes closer (lower OTM%) or widen spread.";
+  } else if (credit > 180) {
+    guidance = "Credit is high — consider moving strikes further OTM for safety.";
+  } else {
+    guidance = "Credit is in optimal range (20–30% of spread width).";
+  }
 
   document.getElementById('result').innerHTML = `
-    <p><strong>Short Strike Range (2–3% OTM):</strong><br>${shortLow} – ${shortHigh}</p>
-    <p><strong>Long Strike Range (+5 pts):</strong><br>${longLow} – ${longHigh}</p>
-    <p>Est. Credit: $${credit} | Max Loss: $${maxLoss}</p>
-    <p>Est. Win Rate: ${winRate}% | EV per trade: $${ev.toFixed(2)}</p>
+    <p><strong>Short Strike:</strong> ${shortStrike}<br>
+    <strong>Long Strike:</strong> ${longStrike}</p>
+    <p>Est. Credit: $${credit.toFixed(0)} | Max Loss: $${maxLoss.toFixed(0)}</p>
+    <p>Est. Win Rate: ${(winRate*100).toFixed(0)}% | EV per trade: $${ev.toFixed(2)}</p>
+    <hr>
+    <p>${guidance}</p>
     <hr>
     <p><strong>Exit Rules:</strong><br>
     - Take profit at 50–60% of credit (e.g., close at $0.60 if sold for $1.20).<br>
-    - Stop out if SPX nears short strike or loss = ~2x credit.</p>
+    - Stop out if SPX nears short strike or loss ≈ 2x credit.</p>
   `;
 }
 </script>
