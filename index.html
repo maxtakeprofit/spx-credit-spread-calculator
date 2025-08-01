@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SPX Call Credit Spread Calculator</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    background-color: #121212;
+    color: #fff;
+    text-align: center;
+    padding: 20px;
+  }
+  input, button {
+    padding: 10px;
+    font-size: 16px;
+    margin: 10px;
+  }
+  .result {
+    margin-top: 20px;
+    font-size: 18px;
+  }
+  .box {
+    background: #1f1f1f;
+    border-radius: 8px;
+    padding: 20px;
+    display: inline-block;
+  }
+</style>
+</head>
+<body>
+  <h1>SPX Call Credit Spread Calculator</h1>
+  <p>Enter current SPX price to get 2–3% OTM strikes and risk metrics.</p>
+  <input type="number" id="spxPrice" placeholder="Enter SPX price" step="0.01">
+  <button onclick="calculate()">Calculate</button>
+
+  <div class="result box" id="result"></div>
+
+<script>
+function calculate() {
+  const price = parseFloat(document.getElementById('spxPrice').value);
+  if (isNaN(price) || price <= 0) {
+    document.getElementById('result').innerHTML = "<p>Please enter a valid SPX price.</p>";
+    return;
+  }
+
+  // 2–3% OTM
+  const shortLow = Math.round(price * 1.02 / 5) * 5;
+  const shortHigh = Math.round(price * 1.03 / 5) * 5;
+
+  // Long strike = short strike + 5
+  const longLow = shortLow + 5;
+  const longHigh = shortHigh + 5;
+
+  // Credit and risk estimates (assuming ~1.20 credit typical for 5-point spread)
+  const credit = 120; // dollars
+  const maxLoss = 500 - credit; // dollars
+  const winRate = 80; // %
+  const ev = ((winRate/100) * credit) - ((1 - winRate/100) * maxLoss);
+
+  document.getElementById('result').innerHTML = `
+    <p><strong>Short Strike Range (2–3% OTM):</strong><br>${shortLow} – ${shortHigh}</p>
+    <p><strong>Long Strike Range (+5 pts):</strong><br>${longLow} – ${longHigh}</p>
+    <p>Est. Credit: $${credit} | Max Loss: $${maxLoss}</p>
+    <p>Est. Win Rate: ${winRate}% | EV per trade: $${ev.toFixed(2)}</p>
+    <hr>
+    <p><strong>Exit Rules:</strong><br>
+    - Take profit at 50–60% of credit (e.g., close at $0.60 if sold for $1.20).<br>
+    - Stop out if SPX nears short strike or loss = ~2x credit.</p>
+  `;
+}
+</script>
+</body>
+</html>
