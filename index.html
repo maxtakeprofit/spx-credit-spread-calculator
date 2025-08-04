@@ -36,28 +36,25 @@
 
     async function fetchSPX() {
       try {
-        // Use proxy to bypass CORS
-        const url = "https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?interval=1d&range=15d";
+        const url = "https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?interval=1d&range=1d";
         const proxyUrl = "https://api.allorigins.win/get?url=" + encodeURIComponent(url);
         const res = await fetch(proxyUrl);
         const dataWrapped = await res.json();
         const data = JSON.parse(dataWrapped.contents);
 
-        const quote = data.chart.result[0].indicators.quote[0];
-        const closes = quote.close;
-        const highs = quote.high;
-        const lows = quote.low;
+        const price = data.chart.result[0].meta.regularMarketPrice;
 
-        const price = closes[closes.length - 1];
-        const atr = highs.reduce((sum, h, i) => sum + (h - lows[i]), 0) / highs.length;
+        // Expected Move Calculation (approx using 18% IV)
+        const impliedVol = 0.18; // can tweak or fetch live IV
+        const expectedMove = price * impliedVol * Math.sqrt(1/365);
 
         // Strategy
-        const safeLevel = price + atr * 1.5;
+        const safeLevel = price + expectedMove * 1.5;
         const shortStrike = Math.round(safeLevel / 5) * 5;
         const longStrike = shortStrike + 20;
 
         // Black-Scholes
-        const sigma = (atr / price) * Math.sqrt(252);
+        const sigma = impliedVol;
         const T = 1/252;
         const r = 0.05;
         const shortPremium = blackScholesCall(price, shortStrike, T, r, sigma);
@@ -66,7 +63,7 @@
 
         document.getElementById("result").innerHTML = `
           <p><strong>Current SPX Price:</strong> ${price.toFixed(2)}</p>
-          <p><strong>Average Daily Range (ATR):</strong> ${atr.toFixed(2)}</p>
+          <p><strong>Expected Move (1D):</strong> ${expectedMove.toFixed(2)}</p>
           <p><strong>Sell Call Strike:</strong> ${shortStrike}</p>
           <p><strong>Buy Call Strike:</strong> ${longStrike}</p>
           <p><strong>Expected Premium Collected:</strong> $${credit.toFixed(2)}</p>
