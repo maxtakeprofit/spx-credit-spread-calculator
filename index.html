@@ -1,154 +1,80 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SPX Credit Spread Calculator</title>
-<style>
-  body {
-    font-family: Arial, sans-serif;
-    background-color: #121212;
-    color: #fff;
-    text-align: center;
-    padding: 20px;
-  }
-  input, select, button {
-    padding: 10px;
-    font-size: 16px;
-    margin: 10px;
-    border-radius: 5px;
-    border: none;
-  }
-  button {
-    background: #2979ff;
-    color: white;
-    cursor: pointer;
-  }
-  .result {
-    margin-top: 20px;
-    font-size: 18px;
-    background: #1f1f1f;
-    border-radius: 8px;
-    padding: 20px;
-    display: inline-block;
-    width: 90%;
-    max-width: 500px;
-  }
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SPX Call Credit Spread Tool</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 600px; margin: 20px auto; line-height: 1.6; }
+    h1 { text-align: center; }
+    .box { background: #f4f4f4; padding: 15px; border-radius: 8px; margin-top: 20px; }
+    .loading { color: #999; text-align: center; }
+  </style>
 </head>
 <body>
-  <h1>SPX Call Credit Spread Calculator</h1>
-  <p>Live SPX price + IV, Black‑Scholes premium for 5/10-point spreads.</p>
-
-  <div id="liveData">Fetching SPX price and IV...</div>
-
-  <!-- Manual fallback inputs (hidden unless fetch fails) -->
-  <div id="manualInputs" style="display:none;">
-    <input type="number" id="manualPrice" placeholder="Enter SPX price manually" step="0.01">
-    <input type="number" id="manualIV" placeholder="Enter IV manually (%)" step="0.1">
-    <button onclick="useManual()">Use Manual Data</button>
+  <h1>SPX Call Credit Spread Strategy</h1>
+  <div id="result" class="box">
+    <p class="loading">Loading live SPX data...</p>
   </div>
 
-  <input type="number" id="otmPercent" placeholder="OTM % (e.g. 1.5)" step="0.1">
-  <select id="dteToggle">
-    <option value="0">0DTE</option>
-    <option value="1" selected>1DTE</option>
-  </select>
-  <button onclick="calculate()">Calculate</button>
-
-  <div class="result" id="result"></div>
-
-<script>
-// --- Black-Scholes Call ---
-function blackScholesCall(S, K, T, r, sigma) {
-    const d1 = (Math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * Math.sqrt(T));
-    const d2 = d1 - sigma * Math.sqrt(T);
-    const N = x => 0.5 * (1 + erf(x / Math.sqrt(2)));
+  <script>
+    // Normal CDF helper
+    function cdf(x) { return (1 + erf(x / Math.sqrt(2))) / 2; }
     function erf(x) {
-        const sign = (x >= 0) ? 1 : -1;
-        x = Math.abs(x);
-        const a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741,
-              a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911;
-        const t = 1 / (1 + p * x);
-        const y = 1 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);
-        return sign * y;
+      const sign = x >= 0 ? 1 : -1;
+      x = Math.abs(x);
+      const a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741;
+      const a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911;
+      const t = 1 / (1 + p * x);
+      return sign * (1 - (((((a5*t + a4)*t) + a3)*t + a2)*t + a1)*t*Math.exp(-x*x));
     }
-    return S * N(d1) - K * Math.exp(-r * T) * N(d2);
-}
 
-// --- Globals ---
-let spxPrice = null;
-let spxIV = null;
-
-// Proxy Fetch (Yahoo Finance)
-async function fetchSPXData() {
-    try {
-        const response = await fetch("https://api.allorigins.win/raw?url=https://query1.finance.yahoo.com/v7/finance/quote?symbols=%5EGSPC");
-        const data = await response.json();
-        spxPrice = data.quoteResponse.result[0].regularMarketPrice;
-        spxIV = data.quoteResponse.result[0].impliedVolatility || 0.12; // fallback 12%
-
-        document.getElementById("liveData").innerHTML =
-            `SPX Price: ${spxPrice} | IV: ${(spxIV*100).toFixed(2)}%`;
-    } catch (e) {
-        document.getElementById("liveData").innerHTML = "Failed to fetch live data. Enter manually:";
-        document.getElementById("manualInputs").style.display = "block";
+    // Black-Scholes for call
+    function blackScholesCall(S, K, T, r, sigma) {
+      const d1 = (Math.log(S/K) + (r + sigma*sigma/2)*T) / (sigma*Math.sqrt(T));
+      const d2 = d1 - sigma*Math.sqrt(T);
+      return S*cdf(d1) - K*Math.exp(-r*T)*cdf(d2);
     }
-}
 
-// Use manual fallback
-function useManual() {
-  spxPrice = parseFloat(document.getElementById("manualPrice").value);
-  spxIV = parseFloat(document.getElementById("manualIV").value) / 100;
-  document.getElementById("liveData").innerHTML =
-    `Manual SPX Price: ${spxPrice} | IV: ${(spxIV*100).toFixed(2)}%`;
-}
+    async function fetchSPX() {
+      try {
+        const res = await fetch("https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?interval=1d&range=15d");
+        const data = await res.json();
+        const quote = data.chart.result[0].indicators.quote[0];
 
-// Calculate spreads
-function calculate() {
-  const otmPercent = parseFloat(document.getElementById('otmPercent').value) / 100;
-  const dte = parseInt(document.getElementById('dteToggle').value);
-  const r = 0.05; // 5% annual risk-free
+        const closes = quote.close;
+        const highs = quote.high;
+        const lows = quote.low;
 
-  if (!spxPrice || isNaN(otmPercent)) {
-    document.getElementById('result').innerHTML = "<p>Need valid SPX price and OTM %.</p>";
-    return;
-  }
+        const price = closes[closes.length - 1];
+        const atr = highs.reduce((sum, h, i) => sum + (h - lows[i]), 0) / highs.length;
 
-  const shortStrike = Math.round(spxPrice * (1 + otmPercent) / 5) * 5;
-  const spreadWidths = [5, 10];
-  const T = Math.max(dte, 0.25) / 365; // avoid zero for 0DTE
+        // Strategy calculation
+        const safeLevel = price + atr * 1.5;
+        const shortStrike = Math.round(safeLevel / 5) * 5;
+        const longStrike = shortStrike + 20;
 
-  let output = `<p><strong>Short Strike:</strong> ${shortStrike}</p>`;
+        // Black-Scholes approximation
+        const sigma = (atr / price) * Math.sqrt(252);
+        const T = 1/252; // 1 day
+        const r = 0.05;
+        const shortPremium = blackScholesCall(price, shortStrike, T, r, sigma);
+        const longPremium = blackScholesCall(price, longStrike, T, r, sigma);
+        const credit = (shortPremium - longPremium) * 100;
 
-  spreadWidths.forEach(width => {
-    const longStrike = shortStrike + width;
-    const shortPremium = blackScholesCall(spxPrice, shortStrike, T, r, spxIV);
-    const longPremium = blackScholesCall(spxPrice, longStrike, T, r, spxIV);
-    const credit = (shortPremium - longPremium) * 100;
-    const maxLoss = width * 100 - credit;
+        document.getElementById("result").innerHTML = `
+          <p><strong>Current SPX Price:</strong> ${price.toFixed(2)}</p>
+          <p><strong>Average Daily Range (ATR):</strong> ${atr.toFixed(2)}</p>
+          <p><strong>Sell Call Strike:</strong> ${shortStrike}</p>
+          <p><strong>Buy Call Strike:</strong> ${longStrike}</p>
+          <p><strong>Expected Premium Collected:</strong> $${credit.toFixed(2)}</p>
+        `;
+      } catch (err) {
+        document.getElementById("result").innerHTML = "<p style='color:red'>Error loading data. Try again later.</p>";
+      }
+    }
 
-    output += `
-      <hr>
-      <p><strong>${width}-Point Spread:</strong><br>
-      Long Strike: ${longStrike}<br>
-      Est. Credit: $${credit.toFixed(2)}<br>
-      Max Loss: $${maxLoss.toFixed(2)}</p>
-    `;
-  });
-
-  output += `
-    <hr>
-    <p><strong>Exit Plan:</strong><br>
-    - Take profit at 50–60% credit<br>
-    - Stop if SPX nears short strike or loss ≈ 2× credit</p>
-  `;
-
-  document.getElementById('result').innerHTML = output;
-}
-
-// Auto-fetch on load
-fetchSPXData();
-</script>
+    fetchSPX();
+  </script>
 </body>
 </html>
