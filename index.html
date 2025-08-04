@@ -16,7 +16,7 @@
     }
     h1 {
       text-align: center;
-      color: #00e676;
+      color: #ffffff; /* White title */
     }
     .box {
       background: #1e1e1e;
@@ -41,68 +41,58 @@
   </div>
 
   <script>
-    function cdf(x) { return (1 + erf(x / Math.sqrt(2))) / 2; }
-    function erf(x) {
-      const sign = x >= 0 ? 1 : -1;
-      x = Math.abs(x);
-      const a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741;
-      const a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911;
-      const t = 1 / (1 + p * x);
-      return sign * (1 - (((((a5*t + a4)*t) + a3)*t + a2)*t + a1)*t*Math.exp(-x*x));
-    }
-
-    function blackScholesCall(S, K, T, r, sigma) {
-      const d1 = (Math.log(S/K) + (r + sigma*sigma/2)*T) / (sigma*Math.sqrt(T));
-      const d2 = d1 - sigma*Math.sqrt(T);
-      return S*cdf(d1) - K*Math.exp(-r*T)*cdf(d2);
-    }
-
-    async function fetchSPX() {
+    async function fetchData() {
       try {
-        // Fetch SPX price
+        // 1. Fetch SPX price (Yahoo)
         const spxUrl = "https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?interval=1d&range=1d";
         const proxy = "https://api.allorigins.win/get?url=";
         const spxRes = await fetch(proxy + encodeURIComponent(spxUrl));
         const spxData = JSON.parse((await spxRes.json()).contents);
         const price = spxData.chart.result[0].meta.regularMarketPrice;
 
-        // Fetch VIX (as implied vol proxy)
-        const vixUrl = "https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX?interval=1d&range=1d";
-        const vixRes = await fetch(proxy + encodeURIComponent(vixUrl));
-        const vixData = JSON.parse((await vixRes.json()).contents);
-        const vix = vixData.chart.result[0].meta.regularMarketPrice;
-        const impliedVol = vix / 100; // e.g., VIX 15 → 0.15 (15%)
+        // 2. Fetch Expected Move (Barchart)
+        const emUrl = "https://www.barchart.com/stocks/quotes/%24SPX/expected-move";
+        const emRes = await fetch(proxy + encodeURIComponent(emUrl));
+        const emHtml = (await emRes.json()).contents;
+        const emMatch = emHtml.match(/Expected Move.*?\\$([0-9,\\.]+)/);
+        const expectedMove = emMatch ? parseFloat(emMatch[1].replace(/,/g, "")) : 0;
 
-        // Expected move using IV
-        const expectedMove = price * impliedVol * Math.sqrt(1/365);
+        // 3. Fetch Option Chain (Barchart)
+        const optionsUrl = "https://www.barchart.com/stocks/quotes/%24SPX/options?expiration=2025-08-04-w";
+        const optRes = await fetch(proxy + encodeURIComponent(optionsUrl));
+        const optHtml = (await optRes.json()).contents;
 
-        // Strategy
-        const safeLevel = price + expectedMove * 1.5;
-        const shortStrike = Math.round(safeLevel / 5) * 5;
-        const longStrike = shortStrike + 20;
+        // Parse strike and premium data (basic regex parse for demo)
+        const optionRegex = /data-row-strike=\"(\\d+)\"[\\s\\S]*?class=\"last\">([0-9\\.]+)<\\/span>/g;
+        let matches, strikes = [];
+        while ((matches = optionRegex.exec(optHtml)) !== null) {
+          strikes.push({
+            strike: parseFloat(matches[1]),
+            premium: parseFloat(matches[2])
+          });
+        }
 
-        // Black-Scholes pricing
-        const sigma = impliedVol;
-        const T = 1/252;
-        const r = 0.05;
-        const shortPremium = blackScholesCall(price, shortStrike, T, r, sigma);
-        const longPremium = blackScholesCall(price, longStrike, T, r, sigma);
-        const credit = (shortPremium - longPremium) * 100;
+        // 4. Determine strikes just above expected move
+        const targetStrike = price + expectedMove * 1.5;
+        const shortCall = strikes.find(s => s.strike >= targetStrike);
+        const longCall = strikes.find(s => s.strike > shortCall.strike);
+
+        // 5. Premium calculation (simplified: short premium - long premium)
+        const credit = shortCall && longCall ? (shortCall.premium - longCall.premium) : 0;
 
         document.getElementById("result").innerHTML = `
           <p><strong>Current SPX Price:</strong> ${price.toFixed(2)}</p>
-          <p><strong>Implied Volatility (from VIX):</strong> ${(impliedVol*100).toFixed(2)}%</p>
-          <p><strong>Expected Move (1D):</strong> ${expectedMove.toFixed(2)}</p>
-          <p><strong>Sell Call Strike:</strong> ${shortStrike}</p>
-          <p><strong>Buy Call Strike:</strong> ${longStrike}</p>
-          <p><strong>Expected Premium Collected:</strong> $${credit.toFixed(2)}</p>
+          <p><strong>Expected Move (Barchart):</strong> ${expectedMove.toFixed(2)}</p>
+          <p><strong>Sell Call Strike:</strong> ${shortCall ? shortCall.strike : "N/A"}</p>
+          <p><strong>Buy Call Strike:</strong> ${longCall ? longCall.strike : "N/A"}</p>
+          <p><strong>Estimated Premium Collected:</strong> $${credit.toFixed(2)}</p>
         `;
       } catch (err) {
         document.getElementById("result").innerHTML = "<p style='color:red'>Error loading data. Try again later.</p>";
       }
     }
 
-    fetchSPX();
+    fetchData();
   </script>
 </body>
 </html>
