@@ -10,30 +10,16 @@
     .box { background: #1e1e1e; padding: 15px; border-radius: 8px; margin-top: 20px; box-shadow: 0 0 8px rgba(0,0,0,0.5); }
     .loading { text-align: center; color: #999; }
     strong { color: #80cbc4; }
-    label { display:block; margin-top:10px; }
-    input { width: 100%; padding:5px; margin-top:5px; }
-    button { margin-top: 10px; padding: 8px 12px; cursor: pointer; }
   </style>
 </head>
 <body>
-  <h1>SPX Call Credit Spread Tool</h1>
-  <div class="box">
-    <label>Days to Expiration:
-      <input type="number" id="days" value="1">
-    </label>
-    <label>Spread Width (points):
-      <input type="number" id="width" value="20">
-    </label>
-    <label>Manual Short Call Bid Price ($):
-      <input type="number" id="manualBid" value="5">
-    </label>
-    <button onclick="fetchData()">Calculate</button>
-  </div>
+  <h1>SPX Call Credit Spread Strategy</h1>
   <div id="result" class="box">
-    <p class="loading">Enter inputs and click Calculate.</p>
+    <p class="loading">Loading live SPX data...</p>
   </div>
 
   <script>
+    // Normal CDF helper
     function cdf(x) { return (1 + erf(x / Math.sqrt(2))) / 2; }
     function erf(x) {
       const sign = x >= 0 ? 1 : -1;
@@ -43,6 +29,8 @@
       const t = 1 / (1 + p * x);
       return sign * (1 - (((((a5*t + a4)*t) + a3)*t + a2)*t + a1)*t*Math.exp(-x*x));
     }
+
+    // Black-Scholes Call Option
     function blackScholesCall(S, K, T, r, sigma) {
       const d1 = (Math.log(S/K) + (r + sigma*sigma/2)*T) / (sigma*Math.sqrt(T));
       const d2 = d1 - sigma*Math.sqrt(T);
@@ -51,10 +39,6 @@
 
     async function fetchData() {
       try {
-        const days = parseFloat(document.getElementById("days").value);
-        const width = parseFloat(document.getElementById("width").value);
-        const manualBid = parseFloat(document.getElementById("manualBid").value);
-
         const proxy = "https://api.allorigins.win/raw?url=";
 
         // 1. Fetch SPX price
@@ -63,37 +47,43 @@
         const spxData = await spxRes.json();
         const price = spxData.chart.result[0].meta.regularMarketPrice;
 
-        // 2. Fetch VIX for implied volatility
+        // 2. Fetch VIX (for implied volatility)
         const vixUrl = "https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX?interval=1d&range=1d";
         const vixRes = await fetch(proxy + encodeURIComponent(vixUrl));
         const vixData = await vixRes.json();
-        const impliedVolAnnual = vixData.chart.result[0].meta.regularMarketPrice / 100;
+        const impliedVol = vixData.chart.result[0].meta.regularMarketPrice / 100;
 
-        // 3. Calculate expected move using IV
-        const T = days / 252;
-        const sigma = impliedVolAnnual;
-        const expectedMove = price * sigma * Math.sqrt(T);
+        // 3. Expected move = price * IV * sqrt(1/365)
+        const expectedMove = price * impliedVol * Math.sqrt(1/365);
 
-        // 4. Strike levels
-        const shortStrike = Math.round((price + expectedMove * 1.5) / 5) * 5;
-        const longStrike = shortStrike + width;
+        // 4. Strategy: price + 1.5 * expected move
+        const safeLevel = price + expectedMove * 1.5;
+        const shortStrike = Math.round(safeLevel / 5) * 5;
+        const longStrike = shortStrike + 20;
 
-        // 5. Premium calculation
+        // 5. Premium estimation using Black-Scholes
+        const sigma = impliedVol;
+        const T = 1/252; // 1-day expiration
         const r = 0.05;
+        const shortPremium = blackScholesCall(price, shortStrike, T, r, sigma);
         const longPremium = blackScholesCall(price, longStrike, T, r, sigma);
-        const credit = (manualBid - longPremium) * 100; // manual bid for short call, BS for long call
+        const credit = (shortPremium - longPremium) * 100; // per contract
 
+        // 6. Display results
         document.getElementById("result").innerHTML = `
-          <p><strong>SPX Price:</strong> ${price.toFixed(2)}</p>
-          <p><strong>Expected Move (from IV):</strong> ${expectedMove.toFixed(2)}</p>
+          <p><strong>Current SPX Price:</strong> ${price.toFixed(2)}</p>
+          <p><strong>Implied Volatility (VIX):</strong> ${(impliedVol*100).toFixed(2)}%</p>
+          <p><strong>Expected Move (1D):</strong> ${expectedMove.toFixed(2)}</p>
           <p><strong>Sell Call Strike:</strong> ${shortStrike}</p>
           <p><strong>Buy Call Strike:</strong> ${longStrike}</p>
-          <p><strong>Estimated Credit:</strong> $${credit.toFixed(2)}</p>
+          <p><strong>Estimated Premium Collected:</strong> $${credit.toFixed(2)}</p>
         `;
       } catch (err) {
-        document.getElementById("result").innerHTML = `<p style='color:red'>Error loading data: ${err.message}</p>`;
+        document.getElementById("result").innerHTML = "<p style='color:red'>Error loading data. Try again later.</p>";
       }
     }
+
+    fetchData();
   </script>
 </body>
 </html>
