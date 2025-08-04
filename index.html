@@ -19,11 +19,11 @@
   </div>
 
   <script>
-    const apiKey = e1de501ef0mshf1409be61438780p154adbjsn9d69287f0255; 
+    const apiKey = "e1de501ef0mshf1409be61438780p154adbjsn9d69287f0255"; // Your RapidAPI key
 
     async function fetchData() {
       try {
-        // 1. Fetch SPX option chain
+        // 1. Fetch SPX option chain from Yahoo via RapidAPI
         const optionsRes = await fetch("https://yh-finance.p.rapidapi.com/stock/v3/get-options?symbol=%5ESPX", {
           method: "GET",
           headers: {
@@ -33,11 +33,15 @@
         });
 
         const data = await optionsRes.json();
+        if (!data || !data.options || data.options.length === 0) {
+          throw new Error("No option data available");
+        }
+
         const price = data.quote.regularMarketPrice;
         const calls = data.options[0].calls;
         const puts = data.options[0].puts;
 
-        // 2. ATM Strike (closest to price)
+        // 2. Find ATM strike
         const atmStrike = calls.reduce((prev, curr) =>
           Math.abs(curr.strike - price) < Math.abs(prev.strike - price) ? curr : prev
         ).strike;
@@ -48,7 +52,7 @@
         // 3. Expected Move = ATM straddle premium
         const expectedMove = atmCall.lastPrice + atmPut.lastPrice;
 
-        // 4. Strategy: price + 1.5x EM
+        // 4. Strategy: price + 1.5x expected move
         const targetStrike = price + expectedMove * 1.5;
         const shortCall = calls.find(c => c.strike >= targetStrike);
         const longCall = calls.find(c => c.strike > shortCall.strike);
@@ -65,7 +69,7 @@
           <p><strong>Estimated Premium Collected:</strong> $${credit.toFixed(2)}</p>
         `;
       } catch (err) {
-        document.getElementById("result").innerHTML = "<p style='color:red'>Error loading data. Check API key or try later.</p>";
+        document.getElementById("result").innerHTML = `<p style='color:red'>Error loading data: ${err.message}</p>`;
       }
     }
 
