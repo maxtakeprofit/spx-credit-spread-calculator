@@ -23,16 +23,33 @@
 
     async function fetchData() {
       try {
-        // 1. Fetch SPX option chain from Yahoo via RapidAPI
-        const optionsRes = await fetch("https://yh-finance.p.rapidapi.com/stock/v3/get-options?symbol=%5ESPX", {
+        // 1. Get available expirations first
+        const expRes = await fetch("https://yh-finance.p.rapidapi.com/stock/v3/get-options?symbol=%5ESPX", {
           method: "GET",
           headers: {
             "X-RapidAPI-Key": apiKey,
             "X-RapidAPI-Host": "yh-finance.p.rapidapi.com"
           }
         });
+        const expData = await expRes.json();
 
+        if (!expData || !expData.expirationDates || expData.expirationDates.length === 0) {
+          throw new Error("No expiration dates found");
+        }
+
+        // Pick nearest expiration
+        const nearestExp = expData.expirationDates[0];
+
+        // 2. Fetch option chain for nearest expiration
+        const optionsRes = await fetch(`https://yh-finance.p.rapidapi.com/stock/v3/get-options?symbol=%5ESPX&date=${nearestExp}`, {
+          method: "GET",
+          headers: {
+            "X-RapidAPI-Key": apiKey,
+            "X-RapidAPI-Host": "yh-finance.p.rapidapi.com"
+          }
+        });
         const data = await optionsRes.json();
+
         if (!data || !data.options || data.options.length === 0) {
           throw new Error("No option data available");
         }
@@ -41,7 +58,7 @@
         const calls = data.options[0].calls;
         const puts = data.options[0].puts;
 
-        // 2. Find ATM strike
+        // Find ATM strike
         const atmStrike = calls.reduce((prev, curr) =>
           Math.abs(curr.strike - price) < Math.abs(prev.strike - price) ? curr : prev
         ).strike;
@@ -49,10 +66,10 @@
         const atmCall = calls.find(c => c.strike === atmStrike);
         const atmPut = puts.find(p => p.strike === atmStrike);
 
-        // 3. Expected Move = ATM straddle premium
+        // Expected Move = ATM straddle premium
         const expectedMove = atmCall.lastPrice + atmPut.lastPrice;
 
-        // 4. Strategy: price + 1.5x expected move
+        // Strategy: price + 1.5x expected move
         const targetStrike = price + expectedMove * 1.5;
         const shortCall = calls.find(c => c.strike >= targetStrike);
         const longCall = calls.find(c => c.strike > shortCall.strike);
