@@ -5,10 +5,33 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SPX Call Credit Spread Tool</title>
   <style>
-    body { font-family: Arial, sans-serif; max-width: 600px; margin: 20px auto; line-height: 1.6; }
-    h1 { text-align: center; }
-    .box { background: #f4f4f4; padding: 15px; border-radius: 8px; margin-top: 20px; }
-    .loading { color: #999; text-align: center; }
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #121212;
+      color: #f5f5f5;
+      max-width: 600px;
+      margin: 20px auto;
+      line-height: 1.6;
+      padding: 0 10px;
+    }
+    h1 {
+      text-align: center;
+      color: #00e676;
+    }
+    .box {
+      background: #1e1e1e;
+      padding: 15px;
+      border-radius: 8px;
+      margin-top: 20px;
+      box-shadow: 0 0 8px rgba(0,0,0,0.5);
+    }
+    .loading {
+      color: #999;
+      text-align: center;
+    }
+    strong {
+      color: #80cbc4;
+    }
   </style>
 </head>
 <body>
@@ -36,16 +59,21 @@
 
     async function fetchSPX() {
       try {
-        const url = "https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?interval=1d&range=1d";
-        const proxyUrl = "https://api.allorigins.win/get?url=" + encodeURIComponent(url);
-        const res = await fetch(proxyUrl);
-        const dataWrapped = await res.json();
-        const data = JSON.parse(dataWrapped.contents);
+        // Fetch SPX price
+        const spxUrl = "https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?interval=1d&range=1d";
+        const proxy = "https://api.allorigins.win/get?url=";
+        const spxRes = await fetch(proxy + encodeURIComponent(spxUrl));
+        const spxData = JSON.parse((await spxRes.json()).contents);
+        const price = spxData.chart.result[0].meta.regularMarketPrice;
 
-        const price = data.chart.result[0].meta.regularMarketPrice;
+        // Fetch VIX (as implied vol proxy)
+        const vixUrl = "https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX?interval=1d&range=1d";
+        const vixRes = await fetch(proxy + encodeURIComponent(vixUrl));
+        const vixData = JSON.parse((await vixRes.json()).contents);
+        const vix = vixData.chart.result[0].meta.regularMarketPrice;
+        const impliedVol = vix / 100; // e.g., VIX 15 → 0.15 (15%)
 
-        // Expected Move Calculation (approx using 18% IV)
-        const impliedVol = 0.18; // can tweak or fetch live IV
+        // Expected move using IV
         const expectedMove = price * impliedVol * Math.sqrt(1/365);
 
         // Strategy
@@ -53,7 +81,7 @@
         const shortStrike = Math.round(safeLevel / 5) * 5;
         const longStrike = shortStrike + 20;
 
-        // Black-Scholes
+        // Black-Scholes pricing
         const sigma = impliedVol;
         const T = 1/252;
         const r = 0.05;
@@ -63,6 +91,7 @@
 
         document.getElementById("result").innerHTML = `
           <p><strong>Current SPX Price:</strong> ${price.toFixed(2)}</p>
+          <p><strong>Implied Volatility (from VIX):</strong> ${(impliedVol*100).toFixed(2)}%</p>
           <p><strong>Expected Move (1D):</strong> ${expectedMove.toFixed(2)}</p>
           <p><strong>Sell Call Strike:</strong> ${shortStrike}</p>
           <p><strong>Buy Call Strike:</strong> ${longStrike}</p>
