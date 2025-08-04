@@ -19,50 +19,63 @@
   </div>
 
   <script>
+    // Normal CDF helper
+    function cdf(x) { return (1 + erf(x / Math.sqrt(2))) / 2; }
+    function erf(x) {
+      const sign = x >= 0 ? 1 : -1;
+      x = Math.abs(x);
+      const a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741;
+      const a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911;
+      const t = 1 / (1 + p * x);
+      return sign * (1 - (((((a5*t + a4)*t) + a3)*t + a2)*t + a1)*t*Math.exp(-x*x));
+    }
+
+    // Black-Scholes Call
+    function blackScholesCall(S, K, T, r, sigma) {
+      const d1 = (Math.log(S/K) + (r + sigma*sigma/2)*T) / (sigma*Math.sqrt(T));
+      const d2 = d1 - sigma*Math.sqrt(T);
+      return S*cdf(d1) - K*Math.exp(-r*T)*cdf(d2);
+    }
+
     async function fetchData() {
       try {
         const proxy = "https://api.allorigins.win/raw?url=";
 
-        // 1. Fetch SPX price
+        // 1. Fetch SPX Price
         const spxUrl = "https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?interval=1d&range=1d";
         const spxRes = await fetch(proxy + encodeURIComponent(spxUrl));
         const spxData = await spxRes.json();
         const price = spxData.chart.result[0].meta.regularMarketPrice;
 
-        // 2. Fetch SPX option chain
-        // Use current weekly expiration (adjust date if needed)
-        const optionsUrl = "https://query2.finance.yahoo.com/v7/finance/options/^SPX";
-        const optRes = await fetch(proxy + encodeURIComponent(optionsUrl));
-        const optData = await optRes.json();
+        // 2. Fetch VIX for implied volatility
+        const vixUrl = "https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX?interval=1d&range=1d";
+        const vixRes = await fetch(proxy + encodeURIComponent(vixUrl));
+        const vixData = await vixRes.json();
+        const impliedVol = vixData.chart.result[0].meta.regularMarketPrice / 100;
 
-        const calls = optData.optionChain.result[0].options[0].calls;
-        const puts = optData.optionChain.result[0].options[0].puts;
+        // 3. Calculate expected move (1-day)
+        const expectedMove = price * impliedVol * Math.sqrt(1/365);
 
-        // 3. Find ATM strikes (closest to current price)
-        let atmStrike = calls.reduce((prev, curr) => 
-          Math.abs(curr.strike - price) < Math.abs(prev.strike - price) ? curr : prev
-        ).strike;
+        // 4. Choose strikes
+        const safeLevel = price + expectedMove * 1.5;
+        const shortStrike = Math.round(safeLevel / 5) * 5;
+        const longStrike = shortStrike + 20;
 
-        const atmCall = calls.find(c => c.strike === atmStrike);
-        const atmPut = puts.find(p => p.strike === atmStrike);
+        // 5. Approximate premiums with Black-Scholes
+        const sigma = impliedVol;
+        const T = 1/252; // 1 day
+        const r = 0.05;
+        const shortPremium = blackScholesCall(price, shortStrike, T, r, sigma);
+        const longPremium = blackScholesCall(price, longStrike, T, r, sigma);
+        const credit = (shortPremium - longPremium) * 100;
 
-        // 4. Expected move = ATM call + put premium
-        const expectedMove = (atmCall.lastPrice + atmPut.lastPrice);
-
-        // 5. Strategy: target strike above price + 1.5x EM
-        const targetStrike = price + expectedMove * 1.5;
-        const shortCall = calls.find(c => c.strike >= targetStrike);
-        const longCall = calls.find(c => c.strike > shortCall.strike);
-
-        const credit = shortCall && longCall 
-          ? (shortCall.lastPrice - longCall.lastPrice) 
-          : 0;
-
+        // 6. Display results
         document.getElementById("result").innerHTML = `
           <p><strong>Current SPX Price:</strong> ${price.toFixed(2)}</p>
-          <p><strong>Expected Move (ATM Straddle):</strong> ${expectedMove.toFixed(2)}</p>
-          <p><strong>Sell Call Strike:</strong> ${shortCall ? shortCall.strike : "N/A"}</p>
-          <p><strong>Buy Call Strike:</strong> ${longCall ? longCall.strike : "N/A"}</p>
+          <p><strong>Implied Volatility (VIX):</strong> ${(impliedVol*100).toFixed(2)}%</p>
+          <p><strong>Expected Move (1D):</strong> ${expectedMove.toFixed(2)}</p>
+          <p><strong>Sell Call Strike:</strong> ${shortStrike}</p>
+          <p><strong>Buy Call Strike:</strong> ${longStrike}</p>
           <p><strong>Estimated Premium Collected:</strong> $${credit.toFixed(2)}</p>
         `;
       } catch (err) {
