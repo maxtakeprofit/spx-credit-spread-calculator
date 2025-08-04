@@ -18,7 +18,6 @@
   </div>
 
   <script>
-    // Normal CDF helper
     function cdf(x) { return (1 + erf(x / Math.sqrt(2))) / 2; }
     function erf(x) {
       const sign = x >= 0 ? 1 : -1;
@@ -29,7 +28,6 @@
       return sign * (1 - (((((a5*t + a4)*t) + a3)*t + a2)*t + a1)*t*Math.exp(-x*x));
     }
 
-    // Black-Scholes for call
     function blackScholesCall(S, K, T, r, sigma) {
       const d1 = (Math.log(S/K) + (r + sigma*sigma/2)*T) / (sigma*Math.sqrt(T));
       const d2 = d1 - sigma*Math.sqrt(T);
@@ -38,10 +36,14 @@
 
     async function fetchSPX() {
       try {
-        const res = await fetch("https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?interval=1d&range=15d");
-        const data = await res.json();
-        const quote = data.chart.result[0].indicators.quote[0];
+        // Use proxy to bypass CORS
+        const url = "https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?interval=1d&range=15d";
+        const proxyUrl = "https://api.allorigins.win/get?url=" + encodeURIComponent(url);
+        const res = await fetch(proxyUrl);
+        const dataWrapped = await res.json();
+        const data = JSON.parse(dataWrapped.contents);
 
+        const quote = data.chart.result[0].indicators.quote[0];
         const closes = quote.close;
         const highs = quote.high;
         const lows = quote.low;
@@ -49,14 +51,14 @@
         const price = closes[closes.length - 1];
         const atr = highs.reduce((sum, h, i) => sum + (h - lows[i]), 0) / highs.length;
 
-        // Strategy calculation
+        // Strategy
         const safeLevel = price + atr * 1.5;
         const shortStrike = Math.round(safeLevel / 5) * 5;
         const longStrike = shortStrike + 20;
 
-        // Black-Scholes approximation
+        // Black-Scholes
         const sigma = (atr / price) * Math.sqrt(252);
-        const T = 1/252; // 1 day
+        const T = 1/252;
         const r = 0.05;
         const shortPremium = blackScholesCall(price, shortStrike, T, r, sigma);
         const longPremium = blackScholesCall(price, longStrike, T, r, sigma);
