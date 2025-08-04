@@ -43,41 +43,35 @@
   <script>
     async function fetchData() {
       try {
+        const proxy = "https://api.allorigins.win/get?url=";
+
         // 1. Fetch SPX price (Yahoo)
         const spxUrl = "https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?interval=1d&range=1d";
-        const proxy = "https://api.allorigins.win/get?url=";
         const spxRes = await fetch(proxy + encodeURIComponent(spxUrl));
         const spxData = JSON.parse((await spxRes.json()).contents);
         const price = spxData.chart.result[0].meta.regularMarketPrice;
 
-        // 2. Fetch Expected Move (Barchart)
-        const emUrl = "https://www.barchart.com/stocks/quotes/%24SPX/expected-move";
+        // 2. Fetch Expected Move (Barchart JSON)
+        const emUrl = "https://www.barchart.com/proxies/core-api/v1/quotes/get?symbols=%24SPX&fields=expectedMove";
         const emRes = await fetch(proxy + encodeURIComponent(emUrl));
-        const emHtml = (await emRes.json()).contents;
-        const emMatch = emHtml.match(/Expected Move.*?\\$([0-9,\\.]+)/);
-        const expectedMove = emMatch ? parseFloat(emMatch[1].replace(/,/g, "")) : 0;
+        const emJson = JSON.parse((await emRes.json()).contents);
+        const expectedMove = emJson.data[0].expectedMove ? parseFloat(emJson.data[0].expectedMove) : 0;
 
-        // 3. Fetch Option Chain (Barchart)
-        const optionsUrl = "https://www.barchart.com/stocks/quotes/%24SPX/options?expiration=2025-08-04-w";
-        const optRes = await fetch(proxy + encodeURIComponent(optionsUrl));
-        const optHtml = (await optRes.json()).contents;
+        // 3. Fetch Options Chain (Barchart JSON)
+        const optUrl = "https://www.barchart.com/proxies/core-api/v1/options/get?symbol=%24SPX&fields=strikePrice,lastPrice&expirationDate=2025-08-04&optionType=call";
+        const optRes = await fetch(proxy + encodeURIComponent(optUrl));
+        const optJson = JSON.parse((await optRes.json()).contents);
+        const calls = optJson.data.map(item => ({
+          strike: parseFloat(item.strikePrice),
+          premium: parseFloat(item.lastPrice)
+        }));
 
-        // Parse strike and premium data (basic regex parse for demo)
-        const optionRegex = /data-row-strike=\"(\\d+)\"[\\s\\S]*?class=\"last\">([0-9\\.]+)<\\/span>/g;
-        let matches, strikes = [];
-        while ((matches = optionRegex.exec(optHtml)) !== null) {
-          strikes.push({
-            strike: parseFloat(matches[1]),
-            premium: parseFloat(matches[2])
-          });
-        }
-
-        // 4. Determine strikes just above expected move
+        // 4. Determine strikes
         const targetStrike = price + expectedMove * 1.5;
-        const shortCall = strikes.find(s => s.strike >= targetStrike);
-        const longCall = strikes.find(s => s.strike > shortCall.strike);
+        const shortCall = calls.find(c => c.strike >= targetStrike);
+        const longCall = calls.find(c => c.strike > shortCall.strike);
 
-        // 5. Premium calculation (simplified: short premium - long premium)
+        // 5. Premium (short - long)
         const credit = shortCall && longCall ? (shortCall.premium - longCall.premium) : 0;
 
         document.getElementById("result").innerHTML = `
@@ -88,7 +82,8 @@
           <p><strong>Estimated Premium Collected:</strong> $${credit.toFixed(2)}</p>
         `;
       } catch (err) {
-        document.getElementById("result").innerHTML = "<p style='color:red'>Error loading data. Try again later.</p>";
+        document.getElementById("result").innerHTML =
+          "<p style='color:red'>Error loading data. Try again later.</p>";
       }
     }
 
