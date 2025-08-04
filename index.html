@@ -19,70 +19,48 @@
   </div>
 
   <script>
-    const apiKey = "e1de501ef0mshf1409be61438780p154adbjsn9d69287f0255"; // Your RapidAPI key
-
     async function fetchData() {
       try {
-        // 1. Get available expirations first
-        const expRes = await fetch("https://yh-finance.p.rapidapi.com/stock/v3/get-options?symbol=%5ESPX", {
-          method: "GET",
-          headers: {
-            "X-RapidAPI-Key": apiKey,
-            "X-RapidAPI-Host": "yh-finance.p.rapidapi.com"
-          }
-        });
-        const expData = await expRes.json();
+        // 1. Fetch SPX options from CBOE
+        const res = await fetch("https://cdn.cboe.com/api/global/delayed_quotes/options/SPX.json");
+        const data = await res.json();
 
-        if (!expData || !expData.expirationDates || expData.expirationDates.length === 0) {
-          throw new Error("No expiration dates found");
+        if (!data || !data.data || !data.data.options) {
+          throw new Error("No SPX options data available");
         }
 
-        // Pick nearest expiration
-        const nearestExp = expData.expirationDates[0];
+        const options = data.data.options;
+        const price = data.data.last_sale.price; // SPX price
 
-        // 2. Fetch option chain for nearest expiration
-        const optionsRes = await fetch(`https://yh-finance.p.rapidapi.com/stock/v3/get-options?symbol=%5ESPX&date=${nearestExp}`, {
-          method: "GET",
-          headers: {
-            "X-RapidAPI-Key": apiKey,
-            "X-RapidAPI-Host": "yh-finance.p.rapidapi.com"
-          }
-        });
-        const data = await optionsRes.json();
-
-        if (!data || !data.options || data.options.length === 0) {
-          throw new Error("No option data available");
-        }
-
-        const price = data.quote.regularMarketPrice;
-        const calls = data.options[0].calls;
-        const puts = data.options[0].puts;
+        // Separate calls and puts
+        const calls = options.filter(opt => opt.option_type === "C");
+        const puts = options.filter(opt => opt.option_type === "P");
 
         // Find ATM strike
         const atmStrike = calls.reduce((prev, curr) =>
-          Math.abs(curr.strike - price) < Math.abs(prev.strike - price) ? curr : prev
-        ).strike;
+          Math.abs(curr.strike_price - price) < Math.abs(prev.strike_price - price) ? curr : prev
+        ).strike_price;
 
-        const atmCall = calls.find(c => c.strike === atmStrike);
-        const atmPut = puts.find(p => p.strike === atmStrike);
+        const atmCall = calls.find(c => c.strike_price === atmStrike);
+        const atmPut = puts.find(p => p.strike_price === atmStrike);
 
-        // Expected Move = ATM straddle premium
-        const expectedMove = atmCall.lastPrice + atmPut.lastPrice;
+        // Expected Move = ATM straddle (call + put midprice)
+        const expectedMove = (atmCall.bid + atmCall.ask)/2 + (atmPut.bid + atmPut.ask)/2;
 
-        // Strategy: price + 1.5x expected move
+        // Target strike = price + 1.5x expected move
         const targetStrike = price + expectedMove * 1.5;
-        const shortCall = calls.find(c => c.strike >= targetStrike);
-        const longCall = calls.find(c => c.strike > shortCall.strike);
+        const shortCall = calls.find(c => c.strike_price >= targetStrike);
+        const longCall = calls.find(c => c.strike_price > shortCall.strike_price);
 
         const credit = shortCall && longCall
-          ? (shortCall.lastPrice - longCall.lastPrice)
+          ? ((shortCall.bid + shortCall.ask)/2 - (longCall.bid + longCall.ask)/2)
           : 0;
 
         document.getElementById("result").innerHTML = `
           <p><strong>Current SPX Price:</strong> ${price.toFixed(2)}</p>
           <p><strong>Expected Move (ATM Straddle):</strong> ${expectedMove.toFixed(2)}</p>
-          <p><strong>Sell Call Strike:</strong> ${shortCall ? shortCall.strike : "N/A"}</p>
-          <p><strong>Buy Call Strike:</strong> ${longCall ? longCall.strike : "N/A"}</p>
+          <p><strong>Sell Call Strike:</strong> ${shortCall ? shortCall.strike_price : "N/A"}</p>
+          <p><strong>Buy Call Strike:</strong> ${longCall ? longCall.strike_price : "N/A"}</p>
           <p><strong>Estimated Premium Collected:</strong> $${credit.toFixed(2)}</p>
         `;
       } catch (err) {
