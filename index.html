@@ -24,8 +24,8 @@
     <label>Spread Width (points):
       <input type="number" id="width" value="20">
     </label>
-    <label>ATM Straddle Price (manual):
-      <input type="number" id="straddle" value="50">
+    <label>Manual Short Call Bid Price ($):
+      <input type="number" id="manualBid" value="5">
     </label>
     <button onclick="fetchData()">Calculate</button>
   </div>
@@ -53,38 +53,39 @@
       try {
         const days = parseFloat(document.getElementById("days").value);
         const width = parseFloat(document.getElementById("width").value);
-        const straddlePrice = parseFloat(document.getElementById("straddle").value);
+        const manualBid = parseFloat(document.getElementById("manualBid").value);
 
         const proxy = "https://api.allorigins.win/raw?url=";
 
-        // 1. Get live SPX price
+        // 1. Fetch SPX price
         const spxUrl = "https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?interval=1d&range=1d";
         const spxRes = await fetch(proxy + encodeURIComponent(spxUrl));
         const spxData = await spxRes.json();
         const price = spxData.chart.result[0].meta.regularMarketPrice;
 
-        // 2. Expected move = manual straddle price
-        const expectedMove = straddlePrice;
+        // 2. Fetch VIX for implied volatility
+        const vixUrl = "https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX?interval=1d&range=1d";
+        const vixRes = await fetch(proxy + encodeURIComponent(vixUrl));
+        const vixData = await vixRes.json();
+        const impliedVolAnnual = vixData.chart.result[0].meta.regularMarketPrice / 100;
 
-        // 3. Time to expiration
+        // 3. Calculate expected move using IV
         const T = days / 252;
+        const sigma = impliedVolAnnual;
+        const expectedMove = price * sigma * Math.sqrt(T);
 
-        // 4. Approximate implied vol from expected move
-        const sigma = expectedMove / (price * Math.sqrt(T)); // reverse solve
-
-        // 5. Strikes
+        // 4. Strike levels
         const shortStrike = Math.round((price + expectedMove * 1.5) / 5) * 5;
         const longStrike = shortStrike + width;
 
-        // 6. Premium estimation
-        const r = 0.05; // Fed Funds approximation
-        const shortPremium = blackScholesCall(price, shortStrike, T, r, sigma);
+        // 5. Premium calculation
+        const r = 0.05;
         const longPremium = blackScholesCall(price, longStrike, T, r, sigma);
-        const credit = (shortPremium - longPremium) * 100;
+        const credit = (manualBid - longPremium) * 100; // manual bid for short call, BS for long call
 
         document.getElementById("result").innerHTML = `
           <p><strong>SPX Price:</strong> ${price.toFixed(2)}</p>
-          <p><strong>Expected Move (Manual Straddle):</strong> ${expectedMove.toFixed(2)}</p>
+          <p><strong>Expected Move (from IV):</strong> ${expectedMove.toFixed(2)}</p>
           <p><strong>Sell Call Strike:</strong> ${shortStrike}</p>
           <p><strong>Buy Call Strike:</strong> ${longStrike}</p>
           <p><strong>Estimated Credit:</strong> $${credit.toFixed(2)}</p>
