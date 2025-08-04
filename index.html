@@ -21,46 +21,60 @@
   <script>
     async function fetchData() {
       try {
-        // 1. Fetch SPX options from CBOE
-        const res = await fetch("https://cdn.cboe.com/api/global/delayed_quotes/options/SPX.json");
-        const data = await res.json();
+        // Fetch CBOE CSV (SPX options)
+        const res = await fetch("https://cdn.cboe.com/api/global/delayed_quotes/options/SPX.csv");
+        if (!res.ok) throw new Error("Failed to load CSV");
+        const csvText = await res.text();
 
-        if (!data || !data.data || !data.data.options) {
-          throw new Error("No SPX options data available");
-        }
+        // Parse CSV lines
+        const rows = csvText.split("\n").map(r => r.split(","));
+        // Find index of columns we need
+        const header = rows[0];
+        const strikeIndex = header.indexOf("strike");
+        const typeIndex = header.indexOf("option_type");
+        const bidIndex = header.indexOf("bid");
+        const askIndex = header.indexOf("ask");
+        const underlyingPriceIndex = header.indexOf("underlying_price");
 
-        const options = data.data.options;
-        const price = data.data.last_sale.price; // SPX price
+        // Filter valid data rows
+        const dataRows = rows.slice(1).filter(r => r.length > 1);
+
+        // Get SPX price (from first row’s underlying_price)
+        const price = parseFloat(dataRows[0][underlyingPriceIndex]);
 
         // Separate calls and puts
-        const calls = options.filter(opt => opt.option_type === "C");
-        const puts = options.filter(opt => opt.option_type === "P");
+        const calls = dataRows.filter(r => r[typeIndex] === "C").map(r => ({
+          strike: parseFloat(r[strikeIndex]),
+          mid: (parseFloat(r[bidIndex]) + parseFloat(r[askIndex])) / 2
+        }));
+        const puts = dataRows.filter(r => r[typeIndex] === "P").map(r => ({
+          strike: parseFloat(r[strikeIndex]),
+          mid: (parseFloat(r[bidIndex]) + parseFloat(r[askIndex])) / 2
+        }));
 
         // Find ATM strike
         const atmStrike = calls.reduce((prev, curr) =>
-          Math.abs(curr.strike_price - price) < Math.abs(prev.strike_price - price) ? curr : prev
-        ).strike_price;
+          Math.abs(curr.strike - price) < Math.abs(prev.strike - price) ? curr : prev
+        ).strike;
 
-        const atmCall = calls.find(c => c.strike_price === atmStrike);
-        const atmPut = puts.find(p => p.strike_price === atmStrike);
+        const atmCall = calls.find(c => c.strike === atmStrike);
+        const atmPut = puts.find(p => p.strike === atmStrike);
 
-        // Expected Move = ATM straddle (call + put midprice)
-        const expectedMove = (atmCall.bid + atmCall.ask)/2 + (atmPut.bid + atmPut.ask)/2;
+        // Expected Move = ATM straddle premium
+        const expectedMove = atmCall.mid + atmPut.mid;
 
         // Target strike = price + 1.5x expected move
         const targetStrike = price + expectedMove * 1.5;
-        const shortCall = calls.find(c => c.strike_price >= targetStrike);
-        const longCall = calls.find(c => c.strike_price > shortCall.strike_price);
+        const shortCall = calls.find(c => c.strike >= targetStrike);
+        const longCall = calls.find(c => c.strike > shortCall.strike);
 
-        const credit = shortCall && longCall
-          ? ((shortCall.bid + shortCall.ask)/2 - (longCall.bid + longCall.ask)/2)
-          : 0;
+        const credit = shortCall && longCall ? (shortCall.mid - longCall.mid) : 0;
 
         document.getElementById("result").innerHTML = `
           <p><strong>Current SPX Price:</strong> ${price.toFixed(2)}</p>
           <p><strong>Expected Move (ATM Straddle):</strong> ${expectedMove.toFixed(2)}</p>
-          <p><strong>Sell Call Strike:</strong> ${shortCall ? shortCall.strike_price : "N/A"}</p>
-          <p><strong>Buy Call Strike:</strong> ${longCall ? longCall.strike_price : "N/A"}</p>
+          <p><strong>Sell Call Strike:</strong> ${shortCall ? shortCall.strike : "N/A"}</p>
+          <p><strong>Buy Call Strike:</strong> ${longCall ? longCall.strike : "N/A"}</p>
           <p><strong>Estimated Premium Collected:</strong> $${credit.toFixed(2)}</p>
         `;
       } catch (err) {
